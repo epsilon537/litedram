@@ -359,12 +359,18 @@ class LiteDRAMECP5DDRPHYCRG(Module):
         self.comb += platform.request("pll_locked").eq(pll.locked)
 
 class LiteDRAMS7DDRPHYCRG(Module):
-    def __init__(self, platform, core_config):
+    def __init__(self, platform, core_config, gen_sys2x=False):
         assert core_config["memtype"] in ["DDR2", "DDR3"]
+
+        if core_config["memtype"] == "DDR2":
+            gen_sys2x=True
+
         self.rst = Signal()
         self.clock_domains.cd_sys = ClockDomain()
+        if gen_sys2x:
+            self.clock_domains.cd_sys2x = ClockDomain(reset_less=True)
+
         if core_config["memtype"] == "DDR2":
-            self.clock_domains.cd_sys2x     = ClockDomain(reset_less=True)
             self.clock_domains.cd_sys2x_dqs = ClockDomain(reset_less=True)
         elif core_config["memtype"] == "DDR3":
             self.clock_domains.cd_sys4x     = ClockDomain(reset_less=True)
@@ -386,8 +392,9 @@ class LiteDRAMS7DDRPHYCRG(Module):
         pll.register_clkin(clk, core_config["input_clk_freq"])
         pll.create_clkout(self.cd_iodelay, core_config["iodelay_clk_freq"])
         pll.create_clkout(self.cd_sys, core_config["sys_clk_freq"])
+        if gen_sys2x:
+            pll.create_clkout(self.cd_sys2x, 2*core_config["sys_clk_freq"])
         if core_config["memtype"] == "DDR2":
-            pll.create_clkout(self.cd_sys2x,     2*core_config["sys_clk_freq"])
             pll.create_clkout(self.cd_sys2x_dqs, 2*core_config["sys_clk_freq"], phase=90)
         elif core_config["memtype"] == "DDR3":
             pll.create_clkout(self.cd_sys4x,     4*core_config["sys_clk_freq"])
@@ -491,15 +498,20 @@ class LiteDRAMCoreControl(Module, AutoCSR):
 # LiteDRAMCore -------------------------------------------------------------------------------------
 
 class LiteDRAMCore(SoCCore):
-    def __init__(self, platform, core_config, **kwargs):
+    def __init__(self, platform, core_config, gen_user_clkx2=False, **kwargs):
+
         platform.add_extension(get_common_ios())
 
+        if gen_user_clkx2 and (core_config["sdram_phy"] == litedram_phys.A7DDRPHY):
+            platform.add_extension([("user_clkx2", 0, Pins(1))])  
+                                        
         # Parameters -------------------------------------------------------------------------------
         sys_clk_freq   = core_config["sys_clk_freq"]
         cpu_type       = core_config["cpu"]
         cpu_variant    = core_config.get("cpu_variant", "standard")
         csr_data_width = core_config.get("csr_data_width", 32)
         uart_type      = core_config.get("uart", "rs232")
+
         if cpu_type is None:
             kwargs["integrated_rom_size"]  = 0
             kwargs["integrated_sram_size"] = 0
@@ -546,7 +558,7 @@ class LiteDRAMCore(SoCCore):
 
         # CRG / Rate -------------------------------------------------------------------------------
         if isinstance(platform, SimPlatform):
-            crg  = CRG(platform.request("clk"))
+            crg  = CRG(platform.request("clk"), gen_sys2x=gen_user_clkx2)
             rate = {"SDR" : "1:1", "DDR2": "1:2", "DDR3": "1:4", "DDR4": "1:4"}[core_config["memtype"]]
         elif core_config["sdram_phy"] in [litedram_phys.GENSDRPHY]:
             crg  = LiteDRAMGENSDRPHYCRG(platform, core_config)
@@ -555,7 +567,7 @@ class LiteDRAMCore(SoCCore):
             crg  = LiteDRAMECP5DDRPHYCRG(platform, core_config)
             rate = {"DDR3": "1:2"}[core_config["memtype"]]
         elif core_config["sdram_phy"] in [litedram_phys.A7DDRPHY, litedram_phys.K7DDRPHY, litedram_phys.V7DDRPHY]:
-            crg  = LiteDRAMS7DDRPHYCRG(platform, core_config)
+            crg  = LiteDRAMS7DDRPHYCRG(platform, core_config, gen_sys2x=gen_user_clkx2)
             rate = {"DDR2": "1:2", "DDR3": "1:4"}[core_config["memtype"]]
         elif core_config["sdram_phy"] in [litedram_phys.USDDRPHY]:
             crg  = LiteDRAMUSDDRPHYCRG(platform, core_config)
@@ -670,6 +682,8 @@ class LiteDRAMCore(SoCCore):
 
         # User ports -------------------------------------------------------------------------------
         self.comb += platform.request("user_clk").eq(ClockSignal())
+        if gen_user_clkx2:
+            self.comb += platform.request("user_clkx2").eq(ClockSignal(cd="sys2x"))
         self.comb += platform.request("user_rst").eq(ResetSignal())
 
         for name, port in core_config["user_ports"].items():
@@ -862,6 +876,7 @@ def main():
     parser.add_argument("config", help="YAML config file")
     parser.add_argument("--sim",  action='store_true',     help="Integrate SDRAMPHYModel in core for simulation")
     parser.add_argument("--name", default="litedram_core", help="Standalone core/module name")
+    parser.add_argument("--gen_user_clkx2", action='store_true', help="Generate and additional, double rate user_clk, for sim or A7DDRPHY.")
     args = parser.parse_args()
     core_config = yaml.load(open(args.config).read(), Loader=yaml.Loader)
 
@@ -895,7 +910,7 @@ def main():
     builder_arguments = builder_argdict(args)
     builder_arguments["compile_gateware"] = False
 
-    soc     = LiteDRAMCore(platform, core_config, integrated_rom_size=0xC000)
+    soc     = LiteDRAMCore(platform, core_config, integrated_rom_size=0xC000, gen_user_clkx2=args.gen_user_clkx2)
     builder = Builder(soc, **builder_arguments)
     builder.build(build_name=args.name, regular_comb=False)
 
