@@ -46,7 +46,7 @@ class LiteDRAMWishbone2Native(Module):
             port.cmd.addr.eq(wishbone.adr - offset),
             port.cmd.we.eq(wishbone.we),
             port.cmd.last.eq(~wishbone.we), # Always wait for reads.
-            port.flush.eq(~wishbone.cyc)    # Flush writes when transaction ends.
+            port.flush.eq(1)    # Flush writes when transaction ends.
         ]
         fsm.act("CMD",
             port.cmd.valid.eq(wishbone.cyc & wishbone.stb),
