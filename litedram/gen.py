@@ -3,7 +3,7 @@
 #
 # This file is part of LiteDRAM.
 #
-# Copyright (c) 2018-2021 Florent Kermarrec <florent@enjoy-digital.fr>
+# Copyright (c) 2018-2024 Florent Kermarrec <florent@enjoy-digital.fr>
 # Copyright (c) 2020 Stefan Schrijvers <ximin@ximinity.net>
 # SPDX-License-Identifier: BSD-2-Clause
 
@@ -395,6 +395,7 @@ class LiteDRAMS7DDRPHYCRG(Module):
         if gen_sys2x:
             pll.create_clkout(self.cd_sys2x, 2*core_config["sys_clk_freq"])
         if core_config["memtype"] == "DDR2":
+            pll.create_clkout(self.cd_sys2x,     2*core_config["sys_clk_freq"])
             pll.create_clkout(self.cd_sys2x_dqs, 2*core_config["sys_clk_freq"], phase=90)
         elif core_config["memtype"] == "DDR3":
             pll.create_clkout(self.cd_sys4x,     4*core_config["sys_clk_freq"])
@@ -499,19 +500,16 @@ class LiteDRAMCoreControl(Module, AutoCSR):
 
 class LiteDRAMCore(SoCCore):
     def __init__(self, platform, core_config, gen_user_clkx2=False, **kwargs):
-
         platform.add_extension(get_common_ios())
 
         if gen_user_clkx2 and (core_config["sdram_phy"] == litedram_phys.A7DDRPHY):
-            platform.add_extension([("user_clkx2", 0, Pins(1))])  
-                                        
+            platform.add_extension([("user_clkx2", 0, Pins(1))])
         # Parameters -------------------------------------------------------------------------------
         sys_clk_freq   = core_config["sys_clk_freq"]
         cpu_type       = core_config["cpu"]
         cpu_variant    = core_config.get("cpu_variant", "standard")
         csr_data_width = core_config.get("csr_data_width", 32)
         uart_type      = core_config.get("uart", "rs232")
-
         if cpu_type is None:
             kwargs["integrated_rom_size"]  = 0
             kwargs["integrated_sram_size"] = 0
